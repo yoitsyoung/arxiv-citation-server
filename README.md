@@ -210,6 +210,33 @@ uv venv && source .venv/bin/activate
 uv pip install -e ".[test]"
 ```
 
+### Running Locally with MCP Clients
+
+Since this package is not yet published to PyPI, use `uv run` with the `--directory` flag instead of `uvx`:
+
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "arxiv-citation-server": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/arxiv-citation-server", "arxiv-citation-server"]
+    }
+  }
+}
+```
+
+**Cursor**:
+
+1. Go to **Settings** → **MCP** → **Add new MCP Server**
+2. Enter:
+   - **Name**: `arxiv-citation-server`
+   - **Type**: `command`
+   - **Command**: `uv run --directory /path/to/arxiv-citation-server arxiv-citation-server`
+
+Replace `/path/to/arxiv-citation-server` with the actual path to the cloned repository.
+
 ### Running Tests
 
 ```bash
