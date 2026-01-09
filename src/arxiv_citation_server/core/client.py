@@ -1,8 +1,8 @@
 """
 Semantic Scholar API client.
 
-Async wrapper around the Semantic Scholar API for fetching paper
-metadata, citations, and references.
+Direct HTTP client for the Semantic Scholar API using httpx.
+Avoids asyncio conflicts from the semanticscholar library.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from semanticscholar import AsyncSemanticScholar
+import httpx
 
 from .models import (
     CitationContext,
@@ -21,13 +21,16 @@ from .models import (
 
 logger = logging.getLogger("arxiv-citation-server")
 
+# Semantic Scholar API base URL
+BASE_URL = "https://api.semanticscholar.org/graph/v1"
+
 
 class SemanticScholarClient:
     """
     Async client for the Semantic Scholar API.
 
-    Handles paper lookups, citation retrieval, and reference retrieval
-    using arXiv IDs or other external identifiers.
+    Uses httpx directly to avoid event loop conflicts with the
+    semanticscholar library.
     """
 
     # Fields to request for paper metadata
@@ -68,57 +71,90 @@ class SemanticScholarClient:
 
         Args:
             api_key: Optional API key for higher rate limits.
-                    Without a key: ~100 requests per 5 minutes.
-                    With a key: ~1 request per second.
             timeout: Request timeout in seconds.
         """
         self.api_key = api_key
         self.timeout = timeout
-        self._client: Optional[AsyncSemanticScholar] = None
+        self._client: Optional[httpx.AsyncClient] = None
 
-    async def _get_client(self) -> AsyncSemanticScholar:
-        """Get or create the async client instance."""
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the async HTTP client."""
         if self._client is None:
-            self._client = AsyncSemanticScholar(
-                api_key=self.api_key,
+            headers = {}
+            if self.api_key:
+                headers["x-api-key"] = self.api_key
+            self._client = httpx.AsyncClient(
+                base_url=BASE_URL,
+                headers=headers,
                 timeout=self.timeout,
             )
         return self._client
 
-    def _format_arxiv_id(self, arxiv_id: str) -> str:
+    def _format_paper_id(self, paper_id: str) -> str:
         """
-        Format an arXiv ID for the Semantic Scholar API.
+        Format a paper ID for the Semantic Scholar API.
 
-        Converts '2103.12345' or '2103.12345v1' to 'ARXIV:2103.12345'.
+        Handles multiple formats:
+        - arXiv ID: '2103.12345' or '2103.12345v1' -> 'ARXIV:2103.12345'
+        - arXiv with prefix: 'arXiv:2103.12345' -> 'ARXIV:2103.12345'
+        - Semantic Scholar ID (40-char hex): used directly
+        - DOI: '10.xxxx/...' -> 'DOI:10.xxxx/...'
         """
+        paper_id = paper_id.strip()
+
+        # Already has a prefix (ARXIV:, DOI:, etc.)
+        if ":" in paper_id and not paper_id.startswith("10."):
+            prefix, value = paper_id.split(":", 1)
+            # Normalize arXiv prefix
+            if prefix.lower() == "arxiv":
+                # Remove version suffix
+                clean_id = value.split("v")[0] if "v" in value else value
+                return f"ARXIV:{clean_id}"
+            return paper_id
+
+        # Semantic Scholar 40-character hex ID
+        if len(paper_id) == 40 and all(c in "0123456789abcdef" for c in paper_id.lower()):
+            return paper_id
+
+        # DOI format
+        if paper_id.startswith("10."):
+            return f"DOI:{paper_id}"
+
+        # Assume arXiv ID format (e.g., '1908.10063' or '2103.12345v1')
         # Remove version suffix if present
-        clean_id = arxiv_id.split("v")[0] if "v" in arxiv_id else arxiv_id
+        clean_id = paper_id.split("v")[0] if "v" in paper_id else paper_id
         return f"ARXIV:{clean_id}"
 
-    def _parse_paper(
+    def _parse_paper_dict(
         self,
-        result: Any,
+        data: dict[str, Any],
         original_id: Optional[str] = None,
     ) -> PaperInfo:
-        """Convert Semantic Scholar result to PaperInfo model."""
-        external_ids = getattr(result, "externalIds", {}) or {}
+        """Convert API response dict to PaperInfo model."""
+        external_ids = data.get("externalIds") or {}
+        paper_id = original_id or data.get("paperId", "unknown")
 
-        # Determine the paper_id to use
-        paper_id = original_id or result.paperId
+        # Parse authors - API returns list of dicts with 'name' key
+        authors = []
+        for author in data.get("authors") or []:
+            if isinstance(author, dict):
+                authors.append(author.get("name", "Unknown"))
+            else:
+                authors.append(str(author))
 
         return PaperInfo(
             paper_id=paper_id,
-            title=result.title or "Unknown Title",
-            authors=[author.name for author in (result.authors or [])],
-            year=result.year,
-            venue=result.venue,
-            abstract=getattr(result, "abstract", None),
+            title=data.get("title") or "Unknown Title",
+            authors=authors,
+            year=data.get("year"),
+            venue=data.get("venue"),
+            abstract=data.get("abstract"),
             arxiv_id=external_ids.get("ArXiv"),
             doi=external_ids.get("DOI"),
-            s2_paper_id=result.paperId,
-            citation_count=getattr(result, "citationCount", None),
-            reference_count=getattr(result, "referenceCount", None),
-            influential_citation_count=getattr(result, "influentialCitationCount", None),
+            s2_paper_id=data.get("paperId"),
+            citation_count=data.get("citationCount"),
+            reference_count=data.get("referenceCount"),
+            influential_citation_count=data.get("influentialCitationCount"),
         )
 
     def _parse_intent(self, intent_str: str) -> CitationIntent:
@@ -133,20 +169,17 @@ class SemanticScholarClient:
 
     def _parse_citation_contexts(
         self,
-        result: Any,
+        data: dict[str, Any],
     ) -> list[CitationContext]:
-        """Extract citation contexts from a Semantic Scholar result."""
+        """Extract citation contexts from API response."""
         contexts = []
-        raw_contexts = getattr(result, "contexts", []) or []
-        raw_intents = getattr(result, "intents", []) or []
-        is_influential = getattr(result, "isInfluential", False)
+        raw_contexts = data.get("contexts") or []
+        raw_intents = data.get("intents") or []
+        is_influential = data.get("isInfluential", False)
 
-        # Contexts and intents are parallel arrays
         for i, ctx_text in enumerate(raw_contexts):
-            # Get intent for this context (may have multiple intents)
             intent = CitationIntent.UNKNOWN
             if i < len(raw_intents) and raw_intents[i]:
-                # Take the first intent if multiple
                 intent_str = raw_intents[i][0] if isinstance(raw_intents[i], list) else raw_intents[i]
                 intent = self._parse_intent(intent_str)
 
@@ -160,166 +193,211 @@ class SemanticScholarClient:
 
         return contexts
 
-    async def get_paper(self, arxiv_id: str) -> Optional[PaperInfo]:
+    async def get_paper(self, paper_id: str) -> Optional[PaperInfo]:
         """
         Get paper metadata from Semantic Scholar.
 
         Args:
-            arxiv_id: The arXiv paper ID (e.g., '2103.12345').
+            paper_id: Paper identifier - arXiv ID, S2 paper ID, or DOI.
 
         Returns:
             PaperInfo or None if not found.
         """
         client = await self._get_client()
-        s2_id = self._format_arxiv_id(arxiv_id)
+        s2_id = self._format_paper_id(paper_id)
+        fields = ",".join(self.PAPER_FIELDS)
 
         try:
-            result = await client.get_paper(s2_id, fields=self.PAPER_FIELDS)
-            if result is None:
-                logger.warning(f"Paper not found: {arxiv_id}")
+            response = await client.get(f"/paper/{s2_id}", params={"fields": fields})
+
+            if response.status_code == 404:
+                logger.warning(f"Paper not found: {paper_id}")
                 return None
-            return self._parse_paper(result, original_id=arxiv_id)
+
+            response.raise_for_status()
+            data = response.json()
+            return self._parse_paper_dict(data, original_id=paper_id)
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching paper {paper_id}: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to fetch paper {arxiv_id}: {e}")
+            logger.error(f"Failed to fetch paper {paper_id}: {e}")
             return None
 
     async def get_citations(
         self,
-        arxiv_id: str,
+        paper_id: str,
         limit: int = 50,
     ) -> list[CitationRelationship]:
         """
         Get papers that cite the given paper.
 
         Args:
-            arxiv_id: The arXiv paper ID.
+            paper_id: Paper identifier - arXiv ID, S2 paper ID, or DOI.
             limit: Maximum number of citations to return.
 
         Returns:
             List of CitationRelationship objects.
         """
         client = await self._get_client()
-        s2_id = self._format_arxiv_id(arxiv_id)
+        s2_id = self._format_paper_id(paper_id)
+
+        # Fields for the citing paper (nested under citingPaper)
+        fields = ",".join([f"citingPaper.{f}" for f in self.PAPER_FIELDS])
+        fields += ",contexts,intents,isInfluential"
 
         try:
             # Get the cited paper's info first
-            cited_paper = await self.get_paper(arxiv_id)
+            cited_paper = await self.get_paper(paper_id)
             if cited_paper is None:
-                cited_paper = PaperInfo(paper_id=arxiv_id, title="Unknown")
+                cited_paper = PaperInfo(paper_id=paper_id, title="Unknown")
 
             # Fetch citations
-            results = await client.get_paper_citations(
-                s2_id,
-                fields=self.CITATION_FIELDS,
-                limit=limit,
+            response = await client.get(
+                f"/paper/{s2_id}/citations",
+                params={"fields": fields, "limit": limit},
             )
 
+            if response.status_code == 404:
+                logger.warning(f"Paper not found for citations: {paper_id}")
+                return []
+
+            response.raise_for_status()
+            data = response.json()
+
             citations = []
-            for result in results:
-                if result is None:
+            for item in data.get("data", []):
+                citing_paper_data = item.get("citingPaper")
+                if not citing_paper_data:
                     continue
 
-                citing_paper = self._parse_paper(result)
-                contexts = self._parse_citation_contexts(result)
+                citing_paper = self._parse_paper_dict(citing_paper_data)
+                contexts = self._parse_citation_contexts(item)
 
                 citations.append(
                     CitationRelationship(
                         citing_paper=citing_paper,
                         cited_paper=cited_paper,
                         contexts=contexts,
-                        is_influential=getattr(result, "isInfluential", False),
+                        is_influential=item.get("isInfluential", False),
                     )
                 )
 
-            logger.info(f"Found {len(citations)} citations for {arxiv_id}")
+            logger.info(f"Found {len(citations)} citations for {paper_id}")
             return citations
 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching citations for {paper_id}: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Failed to fetch citations for {arxiv_id}: {e}")
+            logger.error(f"Failed to fetch citations for {paper_id}: {e}")
             return []
 
     async def get_references(
         self,
-        arxiv_id: str,
+        paper_id: str,
         limit: int = 50,
     ) -> list[CitationRelationship]:
         """
         Get papers referenced by the given paper.
 
         Args:
-            arxiv_id: The arXiv paper ID.
+            paper_id: Paper identifier - arXiv ID, S2 paper ID, or DOI.
             limit: Maximum number of references to return.
 
         Returns:
             List of CitationRelationship objects.
         """
         client = await self._get_client()
-        s2_id = self._format_arxiv_id(arxiv_id)
+        s2_id = self._format_paper_id(paper_id)
+
+        # Fields for the cited paper (nested under citedPaper)
+        fields = ",".join([f"citedPaper.{f}" for f in self.PAPER_FIELDS])
+        fields += ",contexts,intents,isInfluential"
 
         try:
             # Get the citing paper's info first
-            citing_paper = await self.get_paper(arxiv_id)
+            citing_paper = await self.get_paper(paper_id)
             if citing_paper is None:
-                citing_paper = PaperInfo(paper_id=arxiv_id, title="Unknown")
+                citing_paper = PaperInfo(paper_id=paper_id, title="Unknown")
 
             # Fetch references
-            results = await client.get_paper_references(
-                s2_id,
-                fields=self.CITATION_FIELDS,
-                limit=limit,
+            response = await client.get(
+                f"/paper/{s2_id}/references",
+                params={"fields": fields, "limit": limit},
             )
 
+            if response.status_code == 404:
+                logger.warning(f"Paper not found for references: {paper_id}")
+                return []
+
+            response.raise_for_status()
+            data = response.json()
+
             references = []
-            for result in results:
-                if result is None:
+            for item in data.get("data", []):
+                cited_paper_data = item.get("citedPaper")
+                if not cited_paper_data:
                     continue
 
-                cited_paper = self._parse_paper(result)
-                contexts = self._parse_citation_contexts(result)
+                cited_paper = self._parse_paper_dict(cited_paper_data)
+                contexts = self._parse_citation_contexts(item)
 
                 references.append(
                     CitationRelationship(
                         citing_paper=citing_paper,
                         cited_paper=cited_paper,
                         contexts=contexts,
-                        is_influential=getattr(result, "isInfluential", False),
+                        is_influential=item.get("isInfluential", False),
                     )
                 )
 
-            logger.info(f"Found {len(references)} references for {arxiv_id}")
+            logger.info(f"Found {len(references)} references for {paper_id}")
             return references
 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching references for {paper_id}: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Failed to fetch references for {arxiv_id}: {e}")
+            logger.error(f"Failed to fetch references for {paper_id}: {e}")
             return []
 
     async def get_papers_batch(
         self,
-        arxiv_ids: list[str],
+        paper_ids: list[str],
     ) -> dict[str, Optional[PaperInfo]]:
         """
         Batch fetch multiple papers.
 
-        More efficient than individual requests for many papers.
-
         Args:
-            arxiv_ids: List of arXiv paper IDs.
+            paper_ids: List of paper identifiers (arXiv IDs, S2 IDs, or DOIs).
 
         Returns:
             Dict mapping paper_id to PaperInfo (or None if not found).
         """
         client = await self._get_client()
-        s2_ids = [self._format_arxiv_id(aid) for aid in arxiv_ids]
+        fields = ",".join(self.PAPER_FIELDS)
+
+        # Semantic Scholar batch endpoint
+        formatted_ids = [self._format_paper_id(pid) for pid in paper_ids]
 
         try:
-            results = await client.get_papers(s2_ids, fields=self.PAPER_FIELDS)
+            response = await client.post(
+                "/paper/batch",
+                params={"fields": fields},
+                json={"ids": formatted_ids},
+            )
+            response.raise_for_status()
+            results = response.json()
+
             return {
-                arxiv_id: self._parse_paper(result, original_id=arxiv_id) if result else None
-                for arxiv_id, result in zip(arxiv_ids, results)
+                pid: self._parse_paper_dict(result, original_id=pid) if result else None
+                for pid, result in zip(paper_ids, results)
             }
         except Exception as e:
             logger.error(f"Batch fetch failed: {e}")
-            return {aid: None for aid in arxiv_ids}
+            return {pid: None for pid in paper_ids}
 
     async def search_papers(
         self,
@@ -334,10 +412,7 @@ class SemanticScholarClient:
         Args:
             query: Search query string.
             limit: Maximum number of results (default 10, max 100).
-            year: Filter by year. Supports:
-                  - Single year: "2020"
-                  - Range: "2018-2022"
-                  - Partial: "2020-" or "-2020"
+            year: Filter by year (e.g., "2020", "2018-2022", "2020-", "-2020").
             fields_of_study: Filter by fields (e.g., ["Computer Science"]).
 
         Returns:
@@ -345,27 +420,34 @@ class SemanticScholarClient:
         """
         client = await self._get_client()
         limit = min(limit, 100)
+        fields = ",".join(self.PAPER_FIELDS)
+
+        params: dict[str, Any] = {
+            "query": query,
+            "limit": limit,
+            "fields": fields,
+        }
+
+        if year:
+            params["year"] = year
+        if fields_of_study:
+            params["fieldsOfStudy"] = ",".join(fields_of_study)
 
         try:
-            results = await client.search_paper(
-                query=query,
-                limit=limit,
-                year=year,
-                fields_of_study=fields_of_study,
-                fields=self.PAPER_FIELDS,
-            )
+            response = await client.get("/paper/search", params=params)
+            response.raise_for_status()
+            data = response.json()
 
-            # search_paper returns a PaginatedResults object
-            # Access the items attribute to get the papers
             papers = []
-            raw_items = getattr(results, "items", []) or []
-            for result in raw_items:
-                if result is not None:
-                    papers.append(self._parse_paper(result))
+            for item in data.get("data", []):
+                papers.append(self._parse_paper_dict(item))
 
             logger.info(f"Search returned {len(papers)} papers for query: {query}")
             return papers
 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error searching for '{query}': {e}")
+            return []
         except Exception as e:
             logger.error(f"Search failed for query '{query}': {e}")
             return []
@@ -373,5 +455,5 @@ class SemanticScholarClient:
     async def close(self) -> None:
         """Close the client and release resources."""
         if self._client is not None:
-            # AsyncSemanticScholar may not have explicit close
+            await self._client.aclose()
             self._client = None

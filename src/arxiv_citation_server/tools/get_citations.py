@@ -46,7 +46,7 @@ def _get_manager() -> CitationManager:
 # Tool definition
 get_citations_tool = types.Tool(
     name="get_paper_citations",
-    description="""Get papers that cite a given arXiv paper.
+    description="""Get papers that cite a given paper.
 
 Returns citation relationships with:
 - Paper metadata (title, authors, year, venue)
@@ -66,7 +66,7 @@ Use this to:
         "properties": {
             "paper_id": {
                 "type": "string",
-                "description": "arXiv paper ID (e.g., '2103.12345' or '2103.12345v1')",
+                "description": "Paper identifier: arXiv ID (e.g., '1908.10063'), Semantic Scholar ID (40-char hex), or DOI (e.g., '10.xxxx/...')",
             },
             "limit": {
                 "type": "integer",
