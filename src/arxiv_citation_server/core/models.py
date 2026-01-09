@@ -170,3 +170,206 @@ class CitationGraph(BaseModel):
     def get_referenced_papers(self, paper_id: str) -> list[str]:
         """Get all papers that the given paper cites."""
         return [cited for citing, cited in self.edges if citing == paper_id]
+
+
+# =============================================================================
+# NEW MODELS FOR ENHANCED FEATURES
+# =============================================================================
+
+
+class SimilarityMethod(str, Enum):
+    """Methods for computing paper similarity."""
+
+    CO_CITATION = "co_citation"  # Papers cited together
+    BIBLIOGRAPHIC_COUPLING = "bibliographic_coupling"  # Papers citing same references
+    CITATION_OVERLAP = "citation_overlap"  # Combined citation/reference overlap
+
+
+class PaperSimilarity(BaseModel):
+    """
+    Similarity relationship between two papers.
+
+    Computed locally from citation graph data, not from external ML services.
+    """
+
+    paper_a: PaperInfo = Field(..., description="First paper")
+    paper_b: PaperInfo = Field(..., description="Second paper")
+    similarity_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Similarity score 0-1"
+    )
+    method: SimilarityMethod = Field(..., description="How similarity was computed")
+    shared_citations: list[str] = Field(
+        default_factory=list,
+        description="Paper IDs that both papers cite (for bibliographic coupling)",
+    )
+    shared_citers: list[str] = Field(
+        default_factory=list,
+        description="Paper IDs that cite both papers (for co-citation)",
+    )
+    explanation: str = Field(default="", description="Human-readable explanation")
+
+    class Config:
+        frozen = True
+
+
+class PaperCluster(BaseModel):
+    """
+    A cluster of related papers grouped by topic/methodology.
+
+    Clustering is based on citation patterns, not external ML.
+    """
+
+    cluster_id: str = Field(..., description="Unique cluster identifier")
+    label: str = Field(default="", description="Inferred cluster label/topic")
+    papers: list[PaperInfo] = Field(
+        default_factory=list, description="Papers in this cluster"
+    )
+    central_paper_id: Optional[str] = Field(
+        default=None, description="Most central paper (highest in-cluster citations)"
+    )
+    cohesion_score: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Internal connectivity strength"
+    )
+    key_terms: list[str] = Field(
+        default_factory=list, description="Common terms from titles/abstracts"
+    )
+    year_range: tuple[Optional[int], Optional[int]] = Field(
+        default=(None, None), description="Year range of papers in cluster"
+    )
+
+
+class ClusteringResult(BaseModel):
+    """Result of clustering a set of papers."""
+
+    clusters: list[PaperCluster] = Field(default_factory=list)
+    unclustered_papers: list[PaperInfo] = Field(
+        default_factory=list, description="Papers that didn't fit any cluster"
+    )
+    total_papers: int = Field(default=0)
+    method: str = Field(
+        default="label_propagation", description="Clustering method used"
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ResearchGap(BaseModel):
+    """
+    An identified gap in the research landscape.
+
+    Gaps are identified through citation pattern analysis.
+    """
+
+    gap_id: str = Field(..., description="Unique gap identifier")
+    description: str = Field(..., description="Description of the research gap")
+    gap_type: str = Field(
+        default="unexplored",
+        description="Type: 'unexplored', 'bridging', 'temporal', 'methodological'",
+    )
+    evidence_papers: list[str] = Field(
+        default_factory=list,
+        description="Paper IDs that support this gap identification",
+    )
+    related_clusters: list[str] = Field(
+        default_factory=list, description="Cluster IDs related to this gap"
+    )
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    potential_topics: list[str] = Field(
+        default_factory=list, description="Suggested research directions"
+    )
+
+
+class GapAnalysisResult(BaseModel):
+    """Result of research gap analysis."""
+
+    gaps: list[ResearchGap] = Field(default_factory=list)
+    analyzed_paper_count: int = Field(default=0)
+    analysis_depth: int = Field(default=2)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ResearchAreaSummary(BaseModel):
+    """
+    Synthesized summary of a research area from citation graph.
+    """
+
+    root_paper_id: str = Field(..., description="Starting paper for the analysis")
+    area_name: str = Field(default="", description="Inferred area name")
+
+    # Overview statistics
+    total_papers: int = Field(default=0)
+    year_range: tuple[Optional[int], Optional[int]] = Field(default=(None, None))
+
+    # Key papers
+    foundational_papers: list[PaperInfo] = Field(
+        default_factory=list,
+        description="Most-cited papers (foundations of the field)",
+    )
+    recent_influential: list[PaperInfo] = Field(
+        default_factory=list,
+        description="Recent papers with high citation velocity",
+    )
+    bridging_papers: list[PaperInfo] = Field(
+        default_factory=list, description="Papers connecting different sub-areas"
+    )
+
+    # Themes
+    major_themes: list[str] = Field(default_factory=list)
+    methodology_trends: list[str] = Field(default_factory=list)
+
+    # Evolution
+    timeline: list[dict] = Field(
+        default_factory=list, description="Key milestones by year"
+    )
+
+    # Clusters
+    sub_areas: list[PaperCluster] = Field(default_factory=list)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PaperComparison(BaseModel):
+    """
+    Side-by-side comparison of two or more papers.
+    """
+
+    papers: list[PaperInfo] = Field(
+        default_factory=list, description="Papers being compared"
+    )
+
+    # Metadata comparison
+    publication_timeline: list[dict] = Field(default_factory=list)
+    venue_comparison: dict[str, str] = Field(default_factory=dict)
+
+    # Citation comparison
+    citation_counts: dict[str, int] = Field(default_factory=dict)
+    shared_references: list[PaperInfo] = Field(
+        default_factory=list, description="Papers cited by all compared papers"
+    )
+    unique_references: dict[str, list[PaperInfo]] = Field(
+        default_factory=dict,
+        description="Paper ID -> references unique to that paper",
+    )
+
+    # Influence comparison
+    shared_citers: list[PaperInfo] = Field(
+        default_factory=list, description="Papers that cite all compared papers"
+    )
+    citation_overlap_score: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    # Content comparison (from abstracts)
+    common_themes: list[str] = Field(default_factory=list)
+    distinguishing_aspects: dict[str, list[str]] = Field(default_factory=dict)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SearchResult(BaseModel):
+    """
+    Result from Semantic Scholar paper search.
+    """
+
+    query: str = Field(..., description="Original search query")
+    total_results: int = Field(default=0)
+    papers: list[PaperInfo] = Field(default_factory=list)
+    next_offset: Optional[int] = Field(default=None, description="For pagination")
+    searched_at: datetime = Field(default_factory=datetime.utcnow)

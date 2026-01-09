@@ -34,6 +34,20 @@ from .tools import (
     handle_build_graph,
     handle_get_citations,
     handle_get_references,
+    # Advanced search
+    search_s2_tool,
+    handle_search_s2,
+    # Analysis tools
+    find_similar_tool,
+    handle_find_similar,
+    cluster_papers_tool,
+    handle_cluster_papers,
+    summarize_area_tool,
+    handle_summarize_area,
+    find_gaps_tool,
+    handle_find_gaps,
+    compare_papers_tool,
+    handle_compare_papers,
 )
 
 # Initialize settings and server
@@ -75,6 +89,14 @@ async def list_tools() -> List[types.Tool]:
         get_citations_tool,
         get_references_tool,
         build_graph_tool,
+        # Advanced search
+        search_s2_tool,
+        # Analysis tools
+        find_similar_tool,
+        cluster_papers_tool,
+        summarize_area_tool,
+        find_gaps_tool,
+        compare_papers_tool,
     ]
 
 
@@ -103,6 +125,20 @@ async def call_tool(
             return await handle_get_references(arguments)
         elif name == "build_citation_graph":
             return await handle_build_graph(arguments)
+        # Advanced search
+        elif name == "search_semantic_scholar":
+            return await handle_search_s2(arguments)
+        # Analysis tools
+        elif name == "find_similar_papers":
+            return await handle_find_similar(arguments)
+        elif name == "cluster_papers":
+            return await handle_cluster_papers(arguments)
+        elif name == "summarize_research_area":
+            return await handle_summarize_area(arguments)
+        elif name == "find_research_gaps":
+            return await handle_find_gaps(arguments)
+        elif name == "compare_papers":
+            return await handle_compare_papers(arguments)
         else:
             return [
                 types.TextContent(

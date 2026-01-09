@@ -17,16 +17,51 @@ from .models import (
     CitationContext,
     CitationRelationship,
     CitationGraph,
+    # New models
+    SimilarityMethod,
+    PaperSimilarity,
+    PaperCluster,
+    ClusteringResult,
+    ResearchGap,
+    GapAnalysisResult,
+    ResearchAreaSummary,
+    PaperComparison,
+    SearchResult,
 )
 from .service import CitationService
 from .client import SemanticScholarClient
+from .analysis import (
+    SimilarityAnalyzer,
+    ClusterAnalyzer,
+    GapAnalyzer,
+    SummaryGenerator,
+    ComparisonAnalyzer,
+)
 
 __all__ = [
+    # Original models
     "CitationIntent",
     "PaperInfo",
     "CitationContext",
     "CitationRelationship",
     "CitationGraph",
+    # New models
+    "SimilarityMethod",
+    "PaperSimilarity",
+    "PaperCluster",
+    "ClusteringResult",
+    "ResearchGap",
+    "GapAnalysisResult",
+    "ResearchAreaSummary",
+    "PaperComparison",
+    "SearchResult",
+    # Service
     "CitationService",
     "SemanticScholarClient",
+    # Analyzers
+    "SimilarityAnalyzer",
+    "ClusterAnalyzer",
+    "GapAnalyzer",
+    "SummaryGenerator",
+    "ComparisonAnalyzer",
 ]

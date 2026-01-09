@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+import httpx
 from semanticscholar import AsyncSemanticScholar
 
 from .models import (
@@ -56,6 +57,22 @@ class SemanticScholarClient:
         "contexts",
         "intents",
         "isInfluential",
+    ]
+
+    # Fields to request for search results
+    SEARCH_FIELDS = [
+        "paperId",
+        "externalIds",
+        "title",
+        "authors",
+        "year",
+        "venue",
+        "abstract",
+        "citationCount",
+        "referenceCount",
+        "influentialCitationCount",
+        "fieldsOfStudy",
+        "publicationTypes",
     ]
 
     def __init__(
@@ -320,6 +337,96 @@ class SemanticScholarClient:
         except Exception as e:
             logger.error(f"Batch fetch failed: {e}")
             return {aid: None for aid in arxiv_ids}
+
+    async def search_papers(
+        self,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+        year_range: Optional[tuple[int, int]] = None,
+        fields_of_study: Optional[list[str]] = None,
+        min_citation_count: Optional[int] = None,
+    ) -> tuple[list[PaperInfo], int, Optional[int]]:
+        """
+        Search for papers using Semantic Scholar's relevance search.
+
+        Uses /graph/v1/paper/search endpoint for semantic search,
+        complementing the existing arXiv keyword search.
+
+        Args:
+            query: Natural language search query
+            limit: Maximum results (default 20, max 100)
+            offset: Pagination offset
+            year_range: Optional (start_year, end_year) filter
+            fields_of_study: Optional filter by field (e.g., ['Computer Science'])
+            min_citation_count: Optional minimum citation threshold
+
+        Returns:
+            Tuple of (papers, total_count, next_offset)
+        """
+        try:
+            # Build query parameters
+            params = {
+                "query": query,
+                "limit": min(limit, 100),
+                "offset": offset,
+                "fields": ",".join(self.SEARCH_FIELDS),
+            }
+
+            if year_range:
+                params["year"] = f"{year_range[0]}-{year_range[1]}"
+
+            if fields_of_study:
+                params["fieldsOfStudy"] = ",".join(fields_of_study)
+
+            if min_citation_count:
+                params["minCitationCount"] = min_citation_count
+
+            # Use direct HTTP for search endpoint
+            base_url = "https://api.semanticscholar.org/graph/v1/paper/search"
+            headers = {}
+            if self.api_key:
+                headers["x-api-key"] = self.api_key
+
+            async with httpx.AsyncClient(timeout=self.timeout) as http_client:
+                response = await http_client.get(
+                    base_url, params=params, headers=headers
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            papers = []
+            for item in data.get("data", []):
+                papers.append(self._parse_search_result(item))
+
+            total = data.get("total", len(papers))
+            next_offset = offset + limit if offset + limit < total else None
+
+            logger.info(f"S2 search '{query}': {len(papers)} results (total: {total})")
+            return papers, total, next_offset
+
+        except Exception as e:
+            logger.error(f"S2 search failed: {e}")
+            return [], 0, None
+
+    def _parse_search_result(self, item: dict) -> PaperInfo:
+        """Parse a search result item to PaperInfo."""
+        external_ids = item.get("externalIds") or {}
+
+        return PaperInfo(
+            paper_id=item.get("paperId", ""),
+            title=item.get("title", "Unknown Title"),
+            authors=[a.get("name", "") for a in (item.get("authors") or [])],
+            year=item.get("year"),
+            venue=item.get("venue"),
+            abstract=item.get("abstract"),
+            arxiv_id=external_ids.get("ArXiv"),
+            doi=external_ids.get("DOI"),
+            s2_paper_id=item.get("paperId"),
+            citation_count=item.get("citationCount"),
+            reference_count=item.get("referenceCount"),
+            influential_citation_count=item.get("influentialCitationCount"),
+        )
 
     async def close(self) -> None:
         """Close the client and release resources."""

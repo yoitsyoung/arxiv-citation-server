@@ -10,9 +10,27 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from .analysis import (
+    ClusterAnalyzer,
+    ComparisonAnalyzer,
+    GapAnalyzer,
+    SimilarityAnalyzer,
+    SummaryGenerator,
+)
 from .client import SemanticScholarClient
 from .graph import GraphBuilder
-from .models import CitationGraph, CitationRelationship, PaperInfo
+from .models import (
+    CitationGraph,
+    CitationRelationship,
+    ClusteringResult,
+    GapAnalysisResult,
+    PaperComparison,
+    PaperInfo,
+    PaperSimilarity,
+    ResearchAreaSummary,
+    SearchResult,
+    SimilarityMethod,
+)
 
 logger = logging.getLogger("arxiv-citation-server")
 
@@ -196,6 +214,242 @@ class CitationService:
             "arxiv_id": paper.arxiv_id,
             "doi": paper.doi,
         }
+
+    async def search_semantic_scholar(
+        self,
+        query: str,
+        limit: int = 20,
+        year_range: Optional[tuple[int, int]] = None,
+        min_citations: Optional[int] = None,
+    ) -> SearchResult:
+        """
+        Search for papers using Semantic Scholar's semantic search.
+
+        Complements arXiv search with relevance-based results.
+
+        Args:
+            query: Natural language search query
+            limit: Maximum results
+            year_range: Optional (start, end) year filter
+            min_citations: Optional minimum citation count
+
+        Returns:
+            SearchResult with matching papers
+        """
+        papers, total, next_offset = await self.client.search_papers(
+            query=query,
+            limit=limit,
+            year_range=year_range,
+            min_citation_count=min_citations,
+        )
+
+        return SearchResult(
+            query=query,
+            total_results=total,
+            papers=papers,
+            next_offset=next_offset,
+        )
+
+    async def find_similar_papers(
+        self,
+        paper_id: str,
+        method: str = "citation_overlap",
+        top_k: int = 10,
+        graph_depth: int = 2,
+    ) -> list[PaperSimilarity]:
+        """
+        Find papers similar to the given paper using citation analysis.
+
+        First builds a citation graph, then computes similarity based on
+        citation patterns (no external ML required).
+
+        Args:
+            paper_id: The arXiv ID to find similar papers for
+            method: Similarity method ('co_citation', 'bibliographic_coupling', 'citation_overlap')
+            top_k: Number of similar papers to return
+            graph_depth: How deep to build the citation graph
+
+        Returns:
+            List of PaperSimilarity objects, sorted by score
+        """
+        # Build citation graph first
+        graph = await self.build_citation_graph(
+            paper_id,
+            depth=graph_depth,
+            direction="both",
+        )
+
+        # Map method string to enum
+        method_map = {
+            "co_citation": SimilarityMethod.CO_CITATION,
+            "bibliographic_coupling": SimilarityMethod.BIBLIOGRAPHIC_COUPLING,
+            "citation_overlap": SimilarityMethod.CITATION_OVERLAP,
+        }
+        similarity_method = method_map.get(method, SimilarityMethod.CITATION_OVERLAP)
+
+        # Compute similarities
+        analyzer = SimilarityAnalyzer(graph)
+        return analyzer.compute_similarity(paper_id, method=similarity_method, top_k=top_k)
+
+    async def cluster_papers(
+        self,
+        paper_ids: Optional[list[str]] = None,
+        root_paper_id: Optional[str] = None,
+        min_cluster_size: int = 3,
+        graph_depth: int = 2,
+    ) -> ClusteringResult:
+        """
+        Cluster papers by topic/methodology using citation patterns.
+
+        Either provide a list of paper_ids OR a root_paper_id to build a graph from.
+
+        Args:
+            paper_ids: List of paper IDs to cluster (optional)
+            root_paper_id: Build graph from this paper and cluster (optional)
+            min_cluster_size: Minimum papers per cluster
+            graph_depth: Graph depth if building from root
+
+        Returns:
+            ClusteringResult with identified clusters
+        """
+        if root_paper_id:
+            graph = await self.build_citation_graph(
+                root_paper_id,
+                depth=graph_depth,
+                direction="both",
+            )
+        elif paper_ids:
+            # Fetch papers and build a simple graph from their citations
+            graph = await self._build_graph_from_papers(paper_ids)
+        else:
+            raise ValueError("Either paper_ids or root_paper_id must be provided")
+
+        analyzer = ClusterAnalyzer(graph)
+        return analyzer.cluster_papers(min_cluster_size=min_cluster_size)
+
+    async def summarize_research_area(
+        self,
+        paper_id: str,
+        depth: int = 2,
+    ) -> ResearchAreaSummary:
+        """
+        Generate a comprehensive summary of a research area.
+
+        Builds citation graph, clusters papers, and synthesizes insights.
+
+        Args:
+            paper_id: Central paper for the research area
+            depth: How many citation levels to explore
+
+        Returns:
+            ResearchAreaSummary with synthesized overview
+        """
+        # Build graph
+        graph = await self.build_citation_graph(
+            paper_id,
+            depth=depth,
+            direction="both",
+        )
+
+        # Cluster papers
+        cluster_analyzer = ClusterAnalyzer(graph)
+        clusters = cluster_analyzer.cluster_papers()
+
+        # Generate summary
+        generator = SummaryGenerator(graph, clusters)
+        return generator.generate_summary()
+
+    async def find_research_gaps(
+        self,
+        paper_id: str,
+        depth: int = 2,
+    ) -> GapAnalysisResult:
+        """
+        Identify under-explored research areas in a citation network.
+
+        Analyzes the citation graph to find:
+        - Bridging gaps (disconnected clusters)
+        - Temporal gaps (declining areas)
+        - Methodological gaps (unused method-domain combinations)
+
+        Args:
+            paper_id: Central paper to analyze around
+            depth: Citation graph depth
+
+        Returns:
+            GapAnalysisResult with identified research gaps
+        """
+        # Build graph
+        graph = await self.build_citation_graph(
+            paper_id,
+            depth=depth,
+            direction="both",
+        )
+
+        # Cluster papers
+        cluster_analyzer = ClusterAnalyzer(graph)
+        clusters = cluster_analyzer.cluster_papers()
+
+        # Find gaps
+        gap_analyzer = GapAnalyzer(graph, clusters)
+        return gap_analyzer.find_gaps()
+
+    async def compare_papers(
+        self,
+        paper_ids: list[str],
+        include_references: bool = True,
+    ) -> PaperComparison:
+        """
+        Generate side-by-side comparison of multiple papers.
+
+        Args:
+            paper_ids: Papers to compare (2-5 recommended)
+            include_references: Whether to analyze shared/unique references
+
+        Returns:
+            PaperComparison with detailed comparison
+        """
+        if len(paper_ids) < 2:
+            raise ValueError("At least 2 papers required for comparison")
+
+        # Build a graph containing all papers and their relationships
+        graph = await self._build_graph_from_papers(paper_ids)
+
+        analyzer = ComparisonAnalyzer(graph)
+        return analyzer.compare_papers(paper_ids)
+
+    async def _build_graph_from_papers(self, paper_ids: list[str]) -> CitationGraph:
+        """Build a citation graph from a list of papers."""
+        papers = {}
+        edges = []
+
+        # Fetch each paper's info and references
+        for pid in paper_ids:
+            paper = await self.client.get_paper(pid)
+            if paper:
+                papers[pid] = paper
+
+                # Get references
+                refs = await self.client.get_references(pid, limit=50)
+                for ref in refs:
+                    if ref.cited_paper.paper_id not in papers:
+                        papers[ref.cited_paper.paper_id] = ref.cited_paper
+                    edges.append((pid, ref.cited_paper.paper_id))
+
+                # Get citations
+                cits = await self.client.get_citations(pid, limit=50)
+                for cit in cits:
+                    if cit.citing_paper.paper_id not in papers:
+                        papers[cit.citing_paper.paper_id] = cit.citing_paper
+                    edges.append((cit.citing_paper.paper_id, pid))
+
+        return CitationGraph(
+            root_paper_id=paper_ids[0],
+            papers=papers,
+            edges=edges,
+            depth=1,
+            direction="both",
+        )
 
     async def close(self) -> None:
         """Clean up resources."""
