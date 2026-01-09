@@ -21,6 +21,8 @@ from .tools import (
     # Paper tools
     search_papers_tool,
     handle_search_papers,
+    search_semantic_scholar_tool,
+    handle_search_semantic_scholar,
     download_paper_tool,
     handle_download_paper,
     list_papers_tool,
@@ -68,6 +70,7 @@ async def list_tools() -> List[types.Tool]:
     return [
         # Paper tools
         search_papers_tool,
+        search_semantic_scholar_tool,
         download_paper_tool,
         list_papers_tool,
         read_paper_tool,
@@ -90,6 +93,8 @@ async def call_tool(
         # Paper tools
         if name == "search_papers":
             return await handle_search_papers(arguments)
+        elif name == "search_semantic_scholar":
+            return await handle_search_semantic_scholar(arguments)
         elif name == "download_paper":
             return await handle_download_paper(arguments)
         elif name == "list_papers":

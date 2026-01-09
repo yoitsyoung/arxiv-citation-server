@@ -321,6 +321,55 @@ class SemanticScholarClient:
             logger.error(f"Batch fetch failed: {e}")
             return {aid: None for aid in arxiv_ids}
 
+    async def search_papers(
+        self,
+        query: str,
+        limit: int = 10,
+        year: Optional[str] = None,
+        fields_of_study: Optional[list[str]] = None,
+    ) -> list[PaperInfo]:
+        """
+        Search for papers using the Semantic Scholar API.
+
+        Args:
+            query: Search query string.
+            limit: Maximum number of results (default 10, max 100).
+            year: Filter by year. Supports:
+                  - Single year: "2020"
+                  - Range: "2018-2022"
+                  - Partial: "2020-" or "-2020"
+            fields_of_study: Filter by fields (e.g., ["Computer Science"]).
+
+        Returns:
+            List of PaperInfo objects.
+        """
+        client = await self._get_client()
+        limit = min(limit, 100)
+
+        try:
+            results = await client.search_paper(
+                query=query,
+                limit=limit,
+                year=year,
+                fields_of_study=fields_of_study,
+                fields=self.PAPER_FIELDS,
+            )
+
+            # search_paper returns a PaginatedResults object
+            # Access the items attribute to get the papers
+            papers = []
+            raw_items = getattr(results, "items", []) or []
+            for result in raw_items:
+                if result is not None:
+                    papers.append(self._parse_paper(result))
+
+            logger.info(f"Search returned {len(papers)} papers for query: {query}")
+            return papers
+
+        except Exception as e:
+            logger.error(f"Search failed for query '{query}': {e}")
+            return []
+
     async def close(self) -> None:
         """Close the client and release resources."""
         if self._client is not None:
