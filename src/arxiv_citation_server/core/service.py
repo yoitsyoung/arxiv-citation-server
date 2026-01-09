@@ -167,6 +167,38 @@ class CitationService:
             direction=direction,
         )
 
+    async def search_papers(
+        self,
+        query: str,
+        limit: int = 10,
+        year: Optional[str] = None,
+        fields_of_study: Optional[list[str]] = None,
+    ) -> list[PaperInfo]:
+        """
+        Search for papers using Semantic Scholar.
+
+        This allows agents to discover papers beyond arXiv and build
+        relationships using their own reasoning.
+
+        Args:
+            query: Search query string.
+            limit: Maximum results (default 10, max 100).
+            year: Filter by year. Supports:
+                  - Single year: "2020"
+                  - Range: "2018-2022"
+                  - Partial: "2020-" or "-2020"
+            fields_of_study: Filter by fields (e.g., ["Computer Science"]).
+
+        Returns:
+            List of PaperInfo objects with metadata and citation counts.
+        """
+        return await self.client.search_papers(
+            query=query,
+            limit=limit,
+            year=year,
+            fields_of_study=fields_of_study,
+        )
+
     async def get_citation_summary(
         self,
         arxiv_id: str,
