@@ -4,113 +4,123 @@ Citation relationship analysis for arXiv papers using the Semantic Scholar API.
 
 ## Overview
 
-This project provides tools to analyze citation relationships between academic papers, helping researchers:
+This MCP server helps researchers analyze citation relationships between academic papers:
+- Search papers on arXiv and Semantic Scholar
+- Download papers and convert to markdown
 - Discover papers that cite a given work
 - Find papers referenced by a work
 - Build citation network graphs
 - Understand citation contexts and intents
 
-## Architecture
-
-The project follows a clean separation of concerns:
-
-```
-arxiv-citation-server/
-├── src/arxiv_citation_server/
-│   ├── core/           # Pure Python (no MCP deps) - usable by web apps
-│   │   ├── models.py   # Pydantic data models
-│   │   ├── client.py   # Semantic Scholar API wrapper
-│   │   ├── service.py  # CitationService - main business logic
-│   │   └── graph.py    # Graph building logic
-│   ├── resources/      # Storage management
-│   │   └── citations.py # CitationManager - markdown storage
-│   ├── tools/          # MCP tools
-│   ├── prompts/        # MCP prompts
-│   └── server.py       # MCP server entry point
-```
-
-### Key Design Decisions
-
-1. **Core Layer is MCP-Independent**: The `core/` module has no MCP dependencies. Web applications can import and use `CitationService` directly.
-
-2. **Human-Readable Storage**: All data is stored as markdown files, making it easy to inspect, edit, and version control.
-
-3. **Separation of Concerns**:
-   - `core/` = Business logic (API client, service, models)
-   - `resources/` = Storage management
-   - `tools/` = MCP tool definitions and handlers
-   - `prompts/` = MCP prompt definitions
-
 ## Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/arxiv-citation-server.git
-cd arxiv-citation-server
+### Claude Desktop
 
-# Create virtual environment
-uv venv
-source .venv/bin/activate
+Add to your Claude Desktop configuration file:
 
-# Install with dependencies
-uv pip install -e .
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
-# Install with test dependencies
-uv pip install -e ".[test]"
+```json
+{
+  "mcpServers": {
+    "arxiv-citation-server": {
+      "command": "uvx",
+      "args": ["arxiv-citation-server"]
+    }
+  }
+}
 ```
 
-## Usage
+With optional Semantic Scholar API key for higher rate limits:
 
-### As an MCP Server
-
-Run the server:
-```bash
-arxiv-citation-server
-# or
-python -m arxiv_citation_server
+```json
+{
+  "mcpServers": {
+    "arxiv-citation-server": {
+      "command": "uvx",
+      "args": ["arxiv-citation-server"],
+      "env": {
+        "CITATION_S2_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
 ```
 
-### As a Python Library (for Web Apps)
+### VS Code
 
-```python
-from arxiv_citation_server.core import CitationService
+Add to your VS Code settings (JSON) or use the MCP extension:
 
-# Initialize service
-service = CitationService(api_key="optional-s2-api-key")
+```json
+{
+  "mcp.servers": {
+    "arxiv-citation-server": {
+      "command": "uvx",
+      "args": ["arxiv-citation-server"],
+      "env": {
+        "CITATION_S2_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
 
-# Get citations for a paper
-citations = await service.get_citations("2103.12345", limit=50)
-for cit in citations:
-    print(f"{cit.citing_paper.title}")
-    for ctx in cit.contexts:
-        print(f"  Context: {ctx.text[:100]}...")
-        print(f"  Intent: {ctx.intent.value}")
+Or install via command line:
 
-# Get references
-references = await service.get_references("2103.12345")
+```bash
+code --add-mcp '{"name":"arxiv-citation-server","command":"uvx","args":["arxiv-citation-server"]}'
+```
 
-# Build citation graph
-graph = await service.build_citation_graph(
-    "2103.12345",
-    depth=2,
-    direction="both"
-)
-print(f"Found {graph.node_count} papers, {graph.edge_count} relationships")
+### Cursor
+
+1. Go to **Settings** → **MCP** → **Add new MCP Server**
+2. Enter:
+   - **Name**: `arxiv-citation-server`
+   - **Type**: `command`
+   - **Command**: `uvx arxiv-citation-server`
+
+### Other MCP Clients
+
+Use the standard MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "arxiv-citation-server": {
+      "command": "uvx",
+      "args": ["arxiv-citation-server"],
+      "env": {
+        "CITATION_S2_API_KEY": "your-api-key",
+        "CITATION_STORAGE_PATH": "/path/to/citations",
+        "CITATION_PAPERS_PATH": "/path/to/papers"
+      }
+    }
+  }
+}
 ```
 
 ## Configuration
 
-Environment variables (prefixed with `CITATION_`):
+Environment variables (all optional):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CITATION_PAPERS_PATH` | Where to store downloaded papers | `~/.arxiv-citation-server/papers` |
+| `CITATION_S2_API_KEY` | Semantic Scholar API key (recommended for higher rate limits) | None |
 | `CITATION_STORAGE_PATH` | Where to store citation data | `~/.arxiv-citation-server/citations` |
-| `CITATION_S2_API_KEY` | Semantic Scholar API key (optional) | None |
+| `CITATION_PAPERS_PATH` | Where to store downloaded papers | `~/.arxiv-citation-server/papers` |
 | `CITATION_REQUEST_TIMEOUT` | API timeout in seconds | 60 |
 | `CITATION_MAX_CITATIONS` | Max citations per request | 100 |
 | `CITATION_MAX_SEARCH_RESULTS` | Max search results | 50 |
 | `CITATION_MAX_GRAPH_DEPTH` | Max graph traversal depth | 3 |
+
+### Getting a Semantic Scholar API Key
+
+1. Visit [Semantic Scholar API](https://www.semanticscholar.org/product/api)
+2. Sign up for an API key (free for research use)
+3. Set the `CITATION_S2_API_KEY` environment variable
+
+Without an API key, you're limited to ~100 requests per 5 minutes. With a key, you get ~1 request per second.
 
 ## Storage Format
 
@@ -156,26 +166,32 @@ Example `citations.md`:
 ---
 ```
 
-## MCP Tools
+## Tools
 
-### Paper Operations
+### Search
 
 | Tool | Description |
 |------|-------------|
-| `search_papers` | Search for papers on arXiv (supports query syntax) |
+| `search_papers` | Search for papers on arXiv |
+| `search_semantic_scholar` | Search Semantic Scholar for papers by title, author, or keywords |
+
+### Paper Management
+
+| Tool | Description |
+|------|-------------|
 | `download_paper` | Download a paper and convert to markdown |
 | `list_papers` | List all locally stored papers |
 | `read_paper` | Read the content of a stored paper |
 
-### Citation Operations
+### Citations
 
 | Tool | Description |
 |------|-------------|
-| `get_paper_citations` | Get papers that cite a given arXiv paper |
+| `get_paper_citations` | Get papers that cite a given paper |
 | `get_paper_references` | Get papers referenced by a given paper |
 | `build_citation_graph` | Build a citation network graph |
 
-## MCP Prompts
+## Prompts
 
 | Prompt | Description |
 |--------|-------------|
@@ -183,26 +199,22 @@ Example `citations.md`:
 | `literature-map` | Build a literature review map |
 | `find-related-work` | Find related papers via citations |
 
-## Testing
+## Development
+
+### Local Installation
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=arxiv_citation_server
-
-# Run specific test file
-pytest tests/test_models.py
+git clone https://github.com/yourusername/arxiv-citation-server.git
+cd arxiv-citation-server
+uv venv && source .venv/bin/activate
+uv pip install -e ".[test]"
 ```
 
-## Citation Data
+### Running Tests
 
-This project uses the [Semantic Scholar Academic Graph API](https://api.semanticscholar.org/). Citation data includes:
-
-- **Citation Contexts**: Text snippets showing how papers cite each other
-- **Citation Intents**: Why a paper is cited (Background, Method, Result)
-- **Influential Citations**: Whether a citation is particularly significant
+```bash
+pytest
+```
 
 ## License
 
