@@ -70,7 +70,7 @@ Depth 2 is recommended for most use cases.""",
         "properties": {
             "paper_id": {
                 "type": "string",
-                "description": "arXiv paper ID to center the graph on",
+                "description": "Paper identifier: arXiv ID (e.g., '1908.10063'), Semantic Scholar ID (40-char hex), or DOI",
             },
             "depth": {
                 "type": "integer",

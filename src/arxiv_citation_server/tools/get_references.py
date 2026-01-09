@@ -46,7 +46,7 @@ def _get_manager() -> CitationManager:
 # Tool definition
 get_references_tool = types.Tool(
     name="get_paper_references",
-    description="""Get papers referenced by a given arXiv paper.
+    description="""Get papers referenced by a given paper.
 
 Returns the papers that the target paper cites, useful for:
 - Understanding the foundation a paper builds on
@@ -63,7 +63,7 @@ Results are saved as human-readable markdown at:
         "properties": {
             "paper_id": {
                 "type": "string",
-                "description": "arXiv paper ID (e.g., '2103.12345')",
+                "description": "Paper identifier: arXiv ID (e.g., '1908.10063'), Semantic Scholar ID (40-char hex), or DOI (e.g., '10.xxxx/...')",
             },
             "limit": {
                 "type": "integer",

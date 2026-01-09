@@ -7,6 +7,7 @@ and citation analysis using the Semantic Scholar API.
 """
 
 import logging
+import sys
 from typing import Any, Dict, List
 
 import mcp.types as types
@@ -41,9 +42,13 @@ from .tools import (
 # Initialize settings and server
 settings = Settings()
 
-# Configure logging
+# Configure logging to stderr (stdout is reserved for MCP JSON-RPC)
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
+)
 logger = logging.getLogger("arxiv-citation-server")
-logger.setLevel(logging.INFO)
 
 # Create MCP server
 server = Server(settings.APP_NAME)
@@ -125,8 +130,8 @@ async def call_tool(
         ]
 
 
-async def main():
-    """Run the MCP server."""
+async def _async_main():
+    """Async entry point for the MCP server."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Papers path: {settings.PAPERS_PATH}")
     logger.info(f"Citations path: {settings.STORAGE_PATH}")
@@ -146,3 +151,9 @@ async def main():
                 ),
             ),
         )
+
+
+def main():
+    """Run the MCP server (synchronous entry point)."""
+    import asyncio
+    asyncio.run(_async_main())
