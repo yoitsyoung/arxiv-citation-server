@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     # Storage configuration
     STORAGE_PATH: Path = Path.home() / ".arxiv-citation-server" / "citations"
+    PAPERS_PATH: Path = Path.home() / ".arxiv-citation-server" / "papers"
 
     # Semantic Scholar API
     S2_API_KEY: Optional[str] = None  # Optional, for higher rate limits
@@ -53,7 +54,11 @@ class Settings(BaseSettings):
     # Caching
     CACHE_DAYS: int = 7  # Days to cache citation data before refreshing
 
+    # arXiv search settings
+    MAX_SEARCH_RESULTS: int = 50  # Max results per search
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Ensure storage directory exists
+        # Ensure storage directories exist
         self.STORAGE_PATH.mkdir(parents=True, exist_ok=True)
+        self.PAPERS_PATH.mkdir(parents=True, exist_ok=True)

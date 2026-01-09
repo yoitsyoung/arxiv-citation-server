@@ -2,8 +2,8 @@
 ArXiv Citation MCP Server
 =========================
 
-This module implements an MCP server for citation analysis
-using the Semantic Scholar API.
+This module implements an MCP server for arXiv paper management
+and citation analysis using the Semantic Scholar API.
 """
 
 import logging
@@ -18,6 +18,16 @@ from .config import Settings
 from .prompts.handlers import get_prompt as handler_get_prompt
 from .prompts.handlers import list_prompts as handler_list_prompts
 from .tools import (
+    # Paper tools
+    search_papers_tool,
+    handle_search_papers,
+    download_paper_tool,
+    handle_download_paper,
+    list_papers_tool,
+    handle_list_papers,
+    read_paper_tool,
+    handle_read_paper,
+    # Citation tools
     build_graph_tool,
     get_citations_tool,
     get_references_tool,
@@ -54,8 +64,14 @@ async def get_prompt(
 
 @server.list_tools()
 async def list_tools() -> List[types.Tool]:
-    """List available citation tools."""
+    """List available paper and citation tools."""
     return [
+        # Paper tools
+        search_papers_tool,
+        download_paper_tool,
+        list_papers_tool,
+        read_paper_tool,
+        # Citation tools
         get_citations_tool,
         get_references_tool,
         build_graph_tool,
@@ -67,11 +83,21 @@ async def call_tool(
     name: str,
     arguments: Dict[str, Any],
 ) -> List[types.TextContent]:
-    """Handle tool calls for citation operations."""
+    """Handle tool calls for paper and citation operations."""
     logger.debug(f"Calling tool {name} with arguments {arguments}")
 
     try:
-        if name == "get_paper_citations":
+        # Paper tools
+        if name == "search_papers":
+            return await handle_search_papers(arguments)
+        elif name == "download_paper":
+            return await handle_download_paper(arguments)
+        elif name == "list_papers":
+            return await handle_list_papers(arguments)
+        elif name == "read_paper":
+            return await handle_read_paper(arguments)
+        # Citation tools
+        elif name == "get_paper_citations":
             return await handle_get_citations(arguments)
         elif name == "get_paper_references":
             return await handle_get_references(arguments)
@@ -97,7 +123,8 @@ async def call_tool(
 async def main():
     """Run the MCP server."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Storage path: {settings.STORAGE_PATH}")
+    logger.info(f"Papers path: {settings.PAPERS_PATH}")
+    logger.info(f"Citations path: {settings.STORAGE_PATH}")
 
     async with stdio_server() as streams:
         await server.run(

@@ -104,10 +104,12 @@ Environment variables (prefixed with `CITATION_`):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `CITATION_PAPERS_PATH` | Where to store downloaded papers | `~/.arxiv-citation-server/papers` |
 | `CITATION_STORAGE_PATH` | Where to store citation data | `~/.arxiv-citation-server/citations` |
 | `CITATION_S2_API_KEY` | Semantic Scholar API key (optional) | None |
 | `CITATION_REQUEST_TIMEOUT` | API timeout in seconds | 60 |
 | `CITATION_MAX_CITATIONS` | Max citations per request | 100 |
+| `CITATION_MAX_SEARCH_RESULTS` | Max search results | 50 |
 | `CITATION_MAX_GRAPH_DEPTH` | Max graph traversal depth | 3 |
 
 ## Storage Format
@@ -115,12 +117,17 @@ Environment variables (prefixed with `CITATION_`):
 Data is stored as human-readable markdown:
 
 ```
-~/.arxiv-citation-server/citations/
-└── 2103.12345/
-    ├── paper_info.md    # Paper metadata
-    ├── citations.md     # Papers that cite this
-    ├── references.md    # Papers this cites
-    └── graph_depth2_both.md  # Citation graph
+~/.arxiv-citation-server/
+├── papers/                      # Downloaded paper content
+│   ├── 2103.12345.md           # Full paper as markdown
+│   └── 2104.56789.md
+│
+└── citations/                   # Citation data
+    └── 2103.12345/
+        ├── paper_info.md       # Paper metadata
+        ├── citations.md        # Papers that cite this
+        ├── references.md       # Papers this cites
+        └── graph_depth2_both.md  # Citation graph
 ```
 
 Example `citations.md`:
@@ -150,6 +157,17 @@ Example `citations.md`:
 ```
 
 ## MCP Tools
+
+### Paper Operations
+
+| Tool | Description |
+|------|-------------|
+| `search_papers` | Search for papers on arXiv (supports query syntax) |
+| `download_paper` | Download a paper and convert to markdown |
+| `list_papers` | List all locally stored papers |
+| `read_paper` | Read the content of a stored paper |
+
+### Citation Operations
 
 | Tool | Description |
 |------|-------------|
